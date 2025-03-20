@@ -1,0 +1,10 @@
+data
+logs
+.DS_Store
+*.json
+.venv/
+git_hash.h
+debug.*
+debug_custom.json
+credentials.h
+.venv_492/
