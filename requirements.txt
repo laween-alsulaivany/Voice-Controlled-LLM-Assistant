@@ -1,0 +1,25 @@
+dateparser
+openai
+fire
+numpy
+openai-whisper
+pydub
+PyYAML
+requests
+rich
+scipy
+webrtcvad
+
+
+
+pyaudio
+protobuf
+sentencepiece
+transformers
+accelerate
+safetensors
+torch
+bitsandbytes
+bitsandbytes --extra-index-url https://huggingface.github.io/bitsandbytes-precompiled/
+pyttsx3
+wave

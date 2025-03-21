@@ -9,3 +9,4 @@ debug_custom.json
 credentials.h
 .venv_492/
 laween/
+__pycache__/
