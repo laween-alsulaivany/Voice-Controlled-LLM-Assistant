@@ -10,3 +10,5 @@ credentials.h
 .venv_492/
 laween/
 __pycache__/
+.test/
+venv
