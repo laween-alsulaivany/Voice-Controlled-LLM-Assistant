@@ -3,6 +3,7 @@ logs
 .DS_Store
 *.json
 .venv/
+venv/
 git_hash.h
 debug.*
 debug_custom.json
@@ -10,5 +11,5 @@ credentials.h
 .venv_492/
 laween/
 __pycache__/
-.test/
+.voice/
 venv
