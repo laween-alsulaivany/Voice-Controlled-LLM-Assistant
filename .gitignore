@@ -3,6 +3,7 @@ logs
 .DS_Store
 *.json
 .venv/
+venv/
 git_hash.h
 debug.*
 debug_custom.json
