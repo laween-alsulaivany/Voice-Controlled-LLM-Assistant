@@ -2,6 +2,7 @@
 #include <WiFiUdp.h>
 #include <driver/i2s.h>
 #include <Adafruit_NeoPixel.h>
+#include <WiFiManager.h> // Add WiFiManager library
 
 #if __has_include("git_hash.h") // optionally setup post-commit hook to generate git_hash.h
 #include "git_hash.h"
@@ -67,11 +68,29 @@ volatile uint8_t volume = 14; // crude speaker volume control by bitshifting rec
 
 bool mute = false; // track state of mute button
 
+// Forward declarations for functions used before they're defined
+void gotTouch1();
+void gotTouch2();
+void gotTouch3();
+void setLed(uint8_t r, uint8_t g, uint8_t b, uint8_t level, uint8_t fade);
+void micTask(void *pvParameters);
+void updateLedTask(void *parameter);
+
+// WiFiManager trigger detection variables
+#define TOGGLE_COUNT_THRESHOLD 10   // Number of mute state changes needed to trigger WiFiManager
+#define TOGGLE_TIMEOUT_MS 5000      // Time window for mute state changes (5 seconds)
+uint8_t toggleCount = 0;            // Counter for mute switch toggles
+uint32_t lastToggleTime = 0;        // Time of the last toggle
+uint32_t firstToggleTime = 0;       // Time of the first toggle in the sequence
+bool lastMuteState = false;         // To detect transitions
+bool wifiManagerActive = false;     // Flag to indicate if WiFiManager is active
+TaskHandle_t wifiManagerLedTask = NULL; // Handle for the WiFiManager LED task
+
 i2s_config_t i2s_config = {
     .mode = (i2s_mode_t)(I2S_MODE_MASTER | I2S_MODE_TX | I2S_MODE_RX),
     .sample_rate = 16000,
     .bits_per_sample = I2S_BITS_PER_SAMPLE_32BIT,
-    .channel_format = I2S_CHANNEL_FMT_ONLY_RIGHT,
+    .channel_format = I2S_CHANNEL_FMT_ONLY_LEFT,
     .communication_format = I2S_COMM_FORMAT_I2S,
     .intr_alloc_flags = ESP_INTR_FLAG_LEVEL1,
     .dma_buf_count = 4,
@@ -83,9 +102,136 @@ i2s_pin_config_t pin_config = {
     .data_out_num = I2S_OUT,
     .data_in_num = I2S_IN};
 
+// WiFiManager LED animation task
+void wifiManagerLedAnimation(void *parameter) {
+    int ledIndex = 0;
+    
+    while (wifiManagerActive) {
+        // Clear all LEDs
+        leds.clear();
+        
+        // Set the current LED to red
+        leds.setPixelColor(ledIndex, 255, 0, 0);
+        leds.show();
+        
+        // Move to the next LED in sequence
+        ledIndex = (ledIndex + 1) % LED_COUNT;
+        
+        // Delay before updating
+        vTaskDelay(pdMS_TO_TICKS(300));
+    }
+    
+    // Clean up when exiting
+    leds.clear();
+    leds.show();
+    vTaskDelete(NULL);
+}
+
+// Start WiFiManager configuration portal
+void startWiFiManager() {
+    Serial.println("Starting WiFiManager configuration portal");
+    
+    // Set flag to indicate WiFiManager is active
+    wifiManagerActive = true;
+    
+    // Start LED animation task
+    xTaskCreatePinnedToCore(
+        wifiManagerLedAnimation, 
+        "WifiManagerLED", 
+        2048, 
+        NULL, 
+        2, 
+        &wifiManagerLedTask, 
+        1
+    );
+    
+    // Create WiFiManager instance
+    WiFiManager wifiManager;
+    
+    // Configure WiFiManager settings
+    char portal_name[50] = "Onju Settings Portal";
+    
+    // Set up AP with device name
+    wifiManager.setAPCallback([](WiFiManager *wifiManager) {
+        Serial.println("Entered configuration mode");
+    });
+    
+    // Set timeout for configuration portal
+    wifiManager.setConfigPortalTimeout(180); // 3 minutes timeout
+    
+    // Launch configuration portal
+    if (wifiManager.startConfigPortal(portal_name)) {
+        Serial.println("WiFi configuration successful");
+    } else {
+        Serial.println("WiFi configuration timeout or failed");
+    }
+    
+    // End WiFiManager mode
+    wifiManagerActive = false;
+    delay(100); // Give the LED task time to finish
+    
+}
+
+// Check for mute switch triggers for WiFiManager
+void checkWiFiManagerTrigger(bool currentMuteState) {
+    // Detect state change (toggle)
+    if (currentMuteState != lastMuteState) {
+        uint32_t currentTime = millis();
+        
+        // If this is the first toggle or if we've timed out, reset the counter
+        if (toggleCount == 0 || (currentTime - firstToggleTime > TOGGLE_TIMEOUT_MS)) {
+            toggleCount = 1;
+            firstToggleTime = currentTime;
+        } else {
+            // Increment the toggle counter
+            toggleCount++;
+        }
+        
+        // Check if we've reached the threshold within the time window
+        if (toggleCount >= TOGGLE_COUNT_THRESHOLD && 
+            (currentTime - firstToggleTime <= TOGGLE_TIMEOUT_MS)) {
+            // Reset counter to prevent multiple triggers
+            toggleCount = 0;
+            
+            // Launch WiFiManager
+            startWiFiManager();
+        }
+        
+        lastToggleTime = currentTime;
+        lastMuteState = currentMuteState;
+    }
+}
+
+void connectToWiFi() {
+    WiFiManager wifiManager;
+    
+    // Attempt connection
+    if (wifiManager.autoConnect("Onju Settings Portal")) {
+        Serial.println("Using saved WiFi credentials");
+        
+        char desired_hostname[50];
+        snprintf(desired_hostname, sizeof(desired_hostname), "%s-%s", HOST_NAME, BOARD_NAME);
+        
+        if (WiFi.setHostname(desired_hostname)) {
+            Serial.print("Hostname set to ");
+            Serial.println(desired_hostname);
+        }
+        
+       Serial.println(" Connected to WiFi");
+       Serial.println(WiFi.localIP());
+       
+    } else {
+        // WiFi manager timed out. Let's try restarting
+        Serial.println("WiFi Manager timed out. Attempting reboot");
+        delay(500);
+        esp_restart();
+    }
+}
+
 void setup()
 {
     Serial.begin(115200);
+    delay(1000); //wait for serial to initialize
 
     leds.begin();
     leds.show();
@@ -114,6 +260,7 @@ void setup()
     Serial.println("Git hash:" + String(GIT_HASH));
 
     pinMode(MUTE, INPUT_PULLUP);
+    lastMuteState = digitalRead(MUTE); // Initialize the mute state tracking
 
 #ifdef SPEAKER_EN
     Serial.println("Setting SPEAKER_EN");
@@ -161,31 +308,8 @@ void setup()
     Serial.println("PSRAM disabled");
 #endif
 
-    WiFi.begin(ssid, password);
-
-    Serial.print("Connecting to WiFi");
-
-    int ledindex = 1;
-    while (WiFi.status() != WL_CONNECTED)
-    {
-        delay(300);
-        leds.clear();
-        leds.setPixelColor(ledindex, 40, 40, 40);
-        leds.show();
-        ledindex = (ledindex % 4) + 1; // cycle through middle LEDs index 1-4 while connecting
-        Serial.print(".");
-        if (Serial.available())
-        {
-            char inChar = (char)Serial.read();
-            if (inChar == 'r')
-            {
-                Serial.println("[UART] Reset command from UART");
-                esp_restart();
-            }
-        }
-    }
-    Serial.println(" Connected to WiFi");
-    Serial.println(WiFi.localIP());
+    // Connect to WiFi using either saved credentials or WiFiManager
+    connectToWiFi();
 
     leds.clear();
     leds.show();
@@ -240,12 +364,18 @@ void setup()
 void loop()
 {
 #ifndef BOARD_V1
-    if (digitalRead(MUTE) && !mute)
+    bool currentMuteState = digitalRead(MUTE);
+    
+    // Check for WiFiManager trigger
+    checkWiFiManagerTrigger(currentMuteState);
+    
+    // Handle mute state changes
+    if (currentMuteState && !mute)
     {
         mute = true;
         setLed(255, 50, 0, 255, 2); // slow fade red
     }
-    else if (!digitalRead(MUTE) && mute)
+    else if (!currentMuteState && mute)
     {
         mute = false;
         setLed(0, 255, 50, 255, 10); // faster fade green
@@ -295,6 +425,10 @@ void loop()
                 leds.setPixelColor(i, 0, 0, 0);
             }
             leds.show();
+            break;
+        case 'c':
+            Serial.println("[UART] Starting WiFi config portal");
+            startWiFiManager();
             break;
         default:
             Serial.println("[UART] Unknown command: " + String(inChar));
@@ -527,7 +661,7 @@ void micTask(void *pvParameters)
     while (1)
     {
         bool currentState = false;
-        if (isPlaying || mute) // don't listen while playing audio or muted
+        if (isPlaying || mute || wifiManagerActive) // don't listen while playing audio, muted, or during WiFiManager
             ;
         else if (serverIP == IPAddress(0, 0, 0, 0)) // no server greeted us yet, so nowhere to send data
             ;
@@ -586,6 +720,12 @@ void updateLedTask(void *parameter)
     while (1)
     {
         vTaskDelayUntil(&xLastWakeTime, xFrequency);
+        
+        // Skip LED updates if WiFiManager is active (it has its own LED animation)
+        if (wifiManagerActive) {
+            continue;
+        }
+        
         if (ledLevel > 0)
         {
             if (ledLevel > ledFade)
