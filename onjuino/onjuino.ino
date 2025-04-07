@@ -204,7 +204,8 @@ void checkWiFiManagerTrigger(bool currentMuteState) {
 
 void connectToWiFi() {
     WiFiManager wifiManager;
-    
+    wifiManager.setConnectTimeout(10);
+    wifiManager.setConfigPortalTimeout(30);
     // Attempt connection
     if (wifiManager.autoConnect("Onju Settings Portal")) {
         Serial.println("Using saved WiFi credentials");
@@ -221,8 +222,8 @@ void connectToWiFi() {
        Serial.println(WiFi.localIP());
        
     } else {
-        // WiFi manager timed out. Let's try restarting
-        Serial.println("WiFi Manager timed out. Attempting reboot");
+        // WiFi manager timed out. Let's open wifi manager
+        Serial.println("WiFi Manager timed out. Attempting Reboot.");
         delay(500);
         esp_restart();
     }
