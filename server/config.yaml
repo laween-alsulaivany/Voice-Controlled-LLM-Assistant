@@ -1,6 +1,6 @@
 use_maubot: False # this requires a Maubot server running & Beeper
-use_home_assistant: False # this requires a Home Assistant server running (see https://www.home-assistant.io/installation/linux#docker-compose) & a token added to credentials.json
-use_notes: False
+use_home_assistant: True # this requires a Home Assistant server running (see https://www.home-assistant.io/installation/linux#docker-compose) & a token added to credentials.json
+use_notes: True
 
 log_dir: "logs"
 audio_dir: "data"
