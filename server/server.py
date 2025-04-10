@@ -1,3 +1,4 @@
+#file: server.py
 import atexit
 import json
 import os
@@ -281,10 +282,11 @@ def main(**kwargs):
     # Send welcome message to each known device on startup
     for device in manager.devices.values():
         device.log.info("👋 Sending welcome message on server start")
-    try:
-        device.send_audio(config['greeting_wav'], volume=14, fade=10, mic_timeout=30)
-    except Exception as e:
-        device.log.warning(f"Failed to send welcome message: {e}")
+        if device:
+            try:
+                device.send_audio(config['greeting_wav'], volume=14, fade=10, mic_timeout=30)
+            except Exception as e:
+                device.log.warning(f"Failed to send welcome message: {e}")
 
 
     atexit.register(manager.save_to_json)
