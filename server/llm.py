@@ -6,56 +6,37 @@ import time
 from datetime import datetime, timedelta
 from dateutil import tz
 
-# Remove OpenAI import and add appropriate LMStudio client
-# import openai
-import requests  # We'll use requests for LMStudio API calls
+import openai
 from rich import print
 
 import devices
 
-# Remove OpenAI API key setup
-# openai.api_key = os.getenv("OPENAI_API_KEY")
+openai.api_key = os.getenv("OPENAI_API_KEY")
+#We will be using OpenAI library but with LMStudio
 
 class LMStudioFunctionCalling:
     def __init__(self, config):
         self.config = config
         self.functions = self.setup_functions()
-        # LMStudio API endpoint and settings
-        self.base_url = config.get('lmstudio', {}).get('base_url', 'http://localhost:1234/v1')
-        self.api_key = config.get('lmstudio', {}).get('api_key', None)  # May not be needed for local deployment
 
     def call_lmstudio_retry(self, device, max_retries=4, include_functions=False):
         wait_time = 0.5
         for attempt in range(max_retries):
             try:
-                headers = {
-                    "Content-Type": "application/json"
-                }
-                
-                # Add API key to headers if provided
-                if self.api_key:
-                    headers["Authorization"] = f"Bearer {self.api_key}"
-                
-                payload = {
-                    "model": self.config['llm']['lmstudio_model'],
-                    "messages": device.messages,
-                    "max_tokens": 300 if include_functions else 150,
-                    "temperature": 0.7,
-                }
-                
-                # Add functions to payload if needed
-                if include_functions and self.functions:
-                    payload["functions"] = self.functions
-                    payload["function_call"] = "auto"  # Allow the model to decide when to call functions
-                
-                response = requests.post(
-                    f"{self.base_url}/chat/completions",
-                    headers=headers,
-                    json=payload
-                )
-                
-                response.raise_for_status()  # Raise exception for HTTP errors
-                return (True, response.json())
+                if(include_functions):
+                    response = openai.ChatCompletion.create(
+                        model=self.config['llm']['gpt_model'],
+                        messages=device.messages,
+                        functions=self.functions,
+                        max_tokens=300,
+                    )
+                else:
+                    response = openai.ChatCompletion.create(
+                        model=self.config['llm']['gpt_model'],
+                        messages=device.messages,
+                        max_tokens=150,
+                    )
+                return (True, response)
             except Exception as e:
                 device.log.error(f"Attempt {attempt+1} of {max_retries} failed: {e}")
                 if attempt < max_retries - 1:
@@ -67,20 +48,14 @@ class LMStudioFunctionCalling:
     def askLMStudio(self, device, question):
         device.messages.append({"role": "user", "content": question})
 
-        success, response = self.call_lmstudio_retry(device, include_functions=bool(self.functions))
+        success, response = self.call_gpt_retry(device, include_functions=bool(self.functions))
         if not success:
             return f"Error: {response}"
 
-        # Extract the message from the response
         first_message = response["choices"][0]["message"]
-        device.log.info(f"LMStudio Response: \n{first_message}")
-        
-        # Convert to dict if it's not already (depends on how LMStudio returns data)
-        first_message_dict = first_message if isinstance(first_message, dict) else first_message
-        device.messages.append(first_message_dict)
-        
-        # Handle function calling if present
-        if first_message_dict.get("function_call"):
+        device.log.info(f"OpenAI Response: \n{first_message}")
+        device.messages.append(first_message.to_dict())
+        if first_message.get("function_call"):
             available_functions = {}
             if(self.config['use_notes']):
                 available_functions["add_note"] = self.add_note
@@ -91,16 +66,9 @@ class LMStudioFunctionCalling:
             if(self.config['use_home_assistant']):
                 available_functions["control_light"] = self.control_light
 
-            function_name = first_message_dict["function_call"]["name"]
+            function_name = first_message["function_call"]["name"]
             function_to_call = available_functions[function_name]
-            
-            # LMStudio might format the arguments differently, handle both string and dict cases
-            function_args_raw = first_message_dict["function_call"]["arguments"]
-            if isinstance(function_args_raw, str):
-                function_args = json.loads(function_args_raw)
-            else:
-                function_args = function_args_raw
-                
+            function_args = json.loads(first_message["function_call"]["arguments"])
             function_response = function_to_call(device, **function_args)
 
             device.messages.append(
@@ -111,25 +79,17 @@ class LMStudioFunctionCalling:
                 }
             )
 
-            # Get final response after function call
-            success, response = self.call_lmstudio_retry(device, include_functions=False)
+            success, response = self.call_gpt_retry(device, include_functions=False) # don't include functions to get a response
             if not success:
-                return f"Error: {' '.join(str(response).split(' ')[:4])}"
+                return f"Error: {' '.join(response.split(' ')[:4])}"
             
-            device.log.info(f"LMStudio second response content: \n{response['choices'][0]['message']['content']}")
-            
-            # Handle response format, which might be different in LMStudio
-            second_message = response["choices"][0]["message"]
-            second_message_dict = second_message if isinstance(second_message, dict) else {"role": "assistant", "content": second_message}
-            
-            device.messages.append(second_message_dict)
-            return second_message_dict.get("content", "")
+            device.log.info(f"OpenAI second response content: \n{response['choices'][0]['message']['content']}")
+            device.messages.append(response["choices"][0]["message"].to_dict())
+            return response['choices'][0]['message']['content']
         else:
-            return first_message_dict.get("content", "")
+            return first_message["content"]
 
-    # The rest of the functions remain the same - setup_functions, add_note, get_notes, etc.
     def setup_functions(self):
-        # Same as original with no changes needed
         self.functions = []
         USERS_NAME = self.config['llm']['users_name']
 
@@ -222,14 +182,14 @@ class LMStudioFunctionCalling:
                 },
             ]
 
-        # Home Assistant section remains the same
+        # this requires a Home Assistant server running - see https://www.home-assistant.io/installation/linux#docker-compose
         if(self.config['use_home_assistant']):
             with open('credentials.json') as json_file:
                 cred = json.load(json_file)
             HA_URL = cred['home_assistant_url']
             HA_TOKEN = cred['home_assistant_token']
 
-            print(f"\n🏡 Fetching lights from Home Assistant at {HA_URL} to add to function definition for LMStudio")
+            print(f"\n🏡 Fetching lights from Home Assistant at {HA_URL} to add to function definition for LLM")
             
             ha_headers = {
                 "Authorization": f"Bearer {HA_TOKEN}",
@@ -286,7 +246,6 @@ class LMStudioFunctionCalling:
 
         return self.functions
 
-    # The rest of the helper functions remain the same
     def add_note(self, device, note):
         timestamp = datetime.now().isoformat()
         note_obj = {
@@ -392,10 +351,11 @@ class LMStudioFunctionCalling:
             device.log.error(f"Light control error: {response.status_code} {response.text}")
             return f"Error: {response.status_code} {response.text}"
 
-# Helper functions remain the same
+
+# help out the LLM by describing the recency
 def time_ago(unix_timestamp):
     timestamp = datetime.fromtimestamp(unix_timestamp/1000)
-    now = datetime.utcnow()
+    now = datetime.now()
     diff = now - timestamp
 
     seconds_in_day = 60 * 60 * 24
