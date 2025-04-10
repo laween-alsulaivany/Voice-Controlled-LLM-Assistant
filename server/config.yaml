@@ -18,7 +18,7 @@ maubot:
   footer: "\n\n∞ sent by onju, an AI assistant ∞" # if you want to go YOLO and send messages, at least include some disclaimer! ¯\_(ツ)_/¯
 
 llm:
-  "lmstudio_model": "lmstudio-community/Meta-Llama-3-8B-Instruct-GGUF"
+  "lmstudio_model": "lmstudio-community/mistral-nemo-instruct-2407"
   max_messages: 15 # should probably make this pruning time or "conversation" -based instead of count-based
   users_name: "Dyson"
   init_prompt: >

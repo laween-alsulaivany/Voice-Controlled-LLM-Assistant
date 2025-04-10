@@ -284,7 +284,7 @@ def main(**kwargs):
         device.log.info("👋 Sending welcome message on server start")
         if device:
             try:
-                device.send_audio(config['greeting_wav'], volume=14, fade=10, mic_timeout=30)
+                device.send_audio(config['greeting_wav'], volume=10, fade=10, mic_timeout=30)
             except Exception as e:
                 device.log.warning(f"Failed to send welcome message: {e}")
 
