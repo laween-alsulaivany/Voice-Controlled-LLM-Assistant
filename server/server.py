@@ -278,6 +278,15 @@ def main(**kwargs):
     tts = KokoroTTS(config)
     llm = LMStudioFunctionCalling(config)
 
+    # Send welcome message to each known device on startup
+    for device in manager.devices.values():
+        device.log.info("👋 Sending welcome message on server start")
+    try:
+        device.send_audio(config['greeting_wav'], volume=14, fade=10, mic_timeout=30)
+    except Exception as e:
+        device.log.warning(f"Failed to send welcome message: {e}")
+
+
     atexit.register(manager.save_to_json)
 
     threads = [

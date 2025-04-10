@@ -6,7 +6,7 @@ log_dir: "logs"
 audio_dir: "data"
 greeting_wav: "hello_imhere.wav"
 temp_wav_fname: "temp_response.wav"
-elevenlabs_default_voice: "Samantha"
+kokoro_default_voice: "Heart"
 
 devices_file: "devices.json"
 voices_file: "voices.json"
@@ -20,7 +20,7 @@ maubot:
 llm:
   gpt_model: "gpt-3.5-turbo" #  ensure function calling works (> "gpt-3.5-turbo-0613")
   max_messages: 15 # should probably make this pruning time or "conversation" -based instead of count-based
-  users_name: "Justin"
+  users_name: "Dyson"
   init_prompt: >
     You are a friendly assistant to the user, {USER}, and you ALWAYS respond in less than 20 words. You are observant of all the details in the data you have in order to come across as highly observant, emotionally intelligent and humanlike in your responses.
   notes_prompt_append: >

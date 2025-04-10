@@ -59,7 +59,7 @@ class Device:
         self.last_response = None
         self.vad = Vad(self.config)
         self.log = self.setup_logger()
-        self.voice = self.config["elevenlabs_default_voice"] if voice is None else voice
+        self.voice = self.config["kokoro_default_voice"] if voice is None else voice
 
     def construct_init_prompt(self):
         # Give ability for prompts at device level
