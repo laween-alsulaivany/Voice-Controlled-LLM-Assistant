@@ -1,3 +1,4 @@
+#file: server.py
 import atexit
 import json
 import os
@@ -22,8 +23,8 @@ from rich.traceback import install
 install(show_locals=False)
 
 from devices import DeviceManager
-from elevenlabs import ElevenLabs
-from llm import OpenAIFunctionCalling
+from kokoro_tts import KokoroTTS
+from llm import LMStudioFunctionCalling
 
 # listen to UDP packets from devices & use Voice Activity Detection (VAD) to add spoken segments to transcribe queue
 def listen_detect(queue, manager, config):
@@ -151,7 +152,7 @@ def transcribe_respond(queue, tts, llm, config):
                     )
                     if last_one:
                         device.stop_listening()  # while server is "thinking"
-                        text_response = llm.askGPT(device, new_res)
+                        text_response = llm.askLMStudio(device, new_res)
                         device.last_response = text_response  # use this as prompt for next Whisper transcription
                         wav_fname = tts.text_to_speech(
                             device, text_response, path_name=config['audio_dir']
@@ -226,7 +227,7 @@ class ConfigUpdater:
                 elif key == 'max_messages':
                     self.config['llm']['max_messages'] = int(value)
                 elif key == 'voice':
-                    self.config['elevenlabs_default_voice'] = value
+                    self.config['kokoro_default_voice'] = value
                 elif key == 'send':
                     self.config['maubot']['send_replies'] = value
                 else:
@@ -275,8 +276,18 @@ def main(**kwargs):
 
     queue = Queue()
     manager = DeviceManager(config)
-    tts = ElevenLabs(config)
-    llm = OpenAIFunctionCalling(config)
+    tts = KokoroTTS(config)
+    llm = LMStudioFunctionCalling(config)
+
+    # Send welcome message to each known device on startup
+    for device in manager.devices.values():
+        device.log.info("👋 Sending welcome message on server start")
+        if device:
+            try:
+                device.send_audio(config['greeting_wav'], volume=10, fade=10, mic_timeout=30)
+            except Exception as e:
+                device.log.warning(f"Failed to send welcome message: {e}")
+
 
     atexit.register(manager.save_to_json)
 

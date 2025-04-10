@@ -6,35 +6,32 @@ import time
 from datetime import datetime, timedelta
 from dateutil import tz
 
-import openai
+from openai import OpenAI #We will be using OpenAI library but with LMStudio
 from rich import print
 
 import devices
 
-openai.api_key = os.getenv("OPENAI_API_KEY")
+client = OpenAI(base_url="http://localhost:1234/v1", api_key="lm-studio")
 
-class OpenAIFunctionCalling:
+class LMStudioFunctionCalling:
     def __init__(self, config):
         self.config = config
         self.functions = self.setup_functions()
 
-    def call_gpt_retry(self, device, max_retries=4, include_functions=False):
+    def call_lmstudio_retry(self, device, max_retries=4, include_functions=False):
         wait_time = 0.5
         for attempt in range(max_retries):
             try:
-                if(include_functions):
-                    response = openai.ChatCompletion.create(
-                        model=self.config['llm']['gpt_model'],
-                        messages=device.messages,
-                        functions=self.functions,
-                        max_tokens=300,
-                    )
-                else:
-                    response = openai.ChatCompletion.create(
-                        model=self.config['llm']['gpt_model'],
-                        messages=device.messages,
-                        max_tokens=150,
-                    )
+                kwargs = {
+                    "model": self.config['llm']['lmstudio_model'],
+                    "messages": device.messages,
+                    "max_tokens": 300 if include_functions else 150,
+                }
+                if include_functions:
+                    kwargs["tools"] = [{"type": "function", "function": fn} for fn in self.functions]
+                    kwargs["tool_choice"] = "auto"
+
+                response = client.chat.completions.create(**kwargs)
                 return (True, response)
             except Exception as e:
                 device.log.error(f"Attempt {attempt+1} of {max_retries} failed: {e}")
@@ -44,49 +41,63 @@ class OpenAIFunctionCalling:
                 else:
                     return (False, e)
 
-    def askGPT(self, device, question):
+
+    def askLMStudio(self, device, question):
         device.messages.append({"role": "user", "content": question})
 
-        success, response = self.call_gpt_retry(device, include_functions=bool(self.functions))
+        success, response = self.call_lmstudio_retry(device, include_functions=bool(self.functions))
         if not success:
             return f"Error: {response}"
 
-        first_message = response["choices"][0]["message"]
-        device.log.info(f"OpenAI Response: \n{first_message}")
-        device.messages.append(first_message.to_dict())
-        if first_message.get("function_call"):
-            available_functions = {}
-            if(self.config['use_notes']):
-                available_functions["add_note"] = self.add_note
-                available_functions["get_notes"] = self.get_notes
-            if(self.config['use_maubot']):
-                available_functions["get_messages"] = self.get_messages
-                available_functions["reply_message"] = self.reply_message
-            if(self.config['use_home_assistant']):
-                available_functions["control_light"] = self.control_light
+        first_message = response.choices[0].message
+        device.log.info(f"LLM Response: \n{first_message}")
+        device.messages.append(first_message.model_dump())
 
-            function_name = first_message["function_call"]["name"]
-            function_to_call = available_functions[function_name]
-            function_args = json.loads(first_message["function_call"]["arguments"])
-            function_response = function_to_call(device, **function_args)
+        tool_calls = first_message.tool_calls
+        if tool_calls:
+            for tool_call in tool_calls:
+                available_functions = {}
+                if self.config['use_notes']:
+                    available_functions["add_note"] = self.add_note
+                    available_functions["get_notes"] = self.get_notes
+                if self.config['use_maubot']:
+                    available_functions["get_messages"] = self.get_messages
+                    available_functions["reply_message"] = self.reply_message
+                if self.config['use_home_assistant']:
+                    available_functions["control_light"] = self.control_light
 
-            device.messages.append(
-                {
-                    "role": "function",
-                    "name": function_name,
+                function_name = tool_call.function.name
+                try:
+                    function_args = json.loads(tool_call.function.arguments)
+                except Exception as e:
+                    return f"Error parsing function arguments: {e}"
+
+                function_to_call = available_functions.get(function_name)
+                if not function_to_call:
+                    return f"Error: Unknown function '{function_name}'"
+
+                function_response = function_to_call(device, **function_args)
+
+                device.messages.append({
+                    "role": "tool",
+                    "tool_call_id": tool_call.id,
                     "content": function_response,
-                }
-            )
+                })
 
-            success, response = self.call_gpt_retry(device, include_functions=False) # don't include functions to get a response
+            # follow up with response after function(s) executed
+            success, response = self.call_lmstudio_retry(device, include_functions=False)
             if not success:
-                return f"Error: {' '.join(response.split(' ')[:4])}"
-            
-            device.log.info(f"OpenAI second response content: \n{response['choices'][0]['message']['content']}")
-            device.messages.append(response["choices"][0]["message"].to_dict())
-            return response['choices'][0]['message']['content']
+                return f"Error: {' '.join(str(response).split(' ')[:4])}"
+
+            second_message = response.choices[0].message
+            device.log.info(f"LLM second response content: \n{second_message.content}")
+            device.messages.append(second_message.model_dump())
+            return second_message.content
         else:
-            return first_message["content"]
+            return first_message.content
+
+
+
 
     def setup_functions(self):
         self.functions = []
@@ -188,7 +199,7 @@ class OpenAIFunctionCalling:
             HA_URL = cred['home_assistant_url']
             HA_TOKEN = cred['home_assistant_token']
 
-            print(f"\n🏡 Fetching lights from Home Assistant at {HA_URL} to add to function definition for OpenAI")
+            print(f"\n🏡 Fetching lights from Home Assistant at {HA_URL} to add to function definition for LLM")
             
             ha_headers = {
                 "Authorization": f"Bearer {HA_TOKEN}",
@@ -207,7 +218,7 @@ class OpenAIFunctionCalling:
                     device_entity_ids.append(light_state['entity_id'])
                     print(f"{'💡' if light_state['state']=='on' else '🌑'}  {light_state['entity_id']}")
 
-                self.functions.append(
+                self.functions.append( # if adding more functions, change append to += 
                 {
                     "name": "control_light",
                     "description": "Control a light or multiple lights in the smart home system",
@@ -353,8 +364,8 @@ class OpenAIFunctionCalling:
 
 # help out the LLM by describing the recency
 def time_ago(unix_timestamp):
-    timestamp = datetime.utcfromtimestamp(unix_timestamp/1000)
-    now = datetime.utcnow()
+    timestamp = datetime.fromtimestamp(unix_timestamp/1000)
+    now = datetime.now()
     diff = now - timestamp
 
     seconds_in_day = 60 * 60 * 24
@@ -375,10 +386,6 @@ def time_ago(unix_timestamp):
 
 def utc_to_local(utc_timestamp_millis):
     utc_timestamp = utc_timestamp_millis / 1000  # convert to seconds
-    utc_dt = datetime.utcfromtimestamp(utc_timestamp).replace(tzinfo=tz.tzutc())
+    utc_dt = datetime.fromtimestamp(utc_timestamp).replace(tzinfo=tz.tzutc())
     local_dt = utc_dt.astimezone(tz.tzlocal())
     return local_dt.strftime("%I:%M %p")
-
-
-
-
