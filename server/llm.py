@@ -13,6 +13,21 @@ import devices
 
 client = OpenAI(base_url="http://localhost:1234/v1", api_key="lm-studio")
 
+def time_model_response(call_fn, *args, **kwargs):
+    """
+    Measures how long a model call takes.
+    
+    Args:
+        call_fn: The model call function, e.g., client.chat.completions.create
+        *args, **kwargs: Arguments to pass to the model call
+    
+    Returns:
+        (duration_in_seconds, result)
+    """
+    start_time = time.time()
+    result = call_fn(*args, **kwargs)
+    end_time = time.time()
+    return end_time - start_time, result
 class LMStudioFunctionCalling:
     def __init__(self, config):
         self.config = config
@@ -31,7 +46,9 @@ class LMStudioFunctionCalling:
                     kwargs["tools"] = [{"type": "function", "function": fn} for fn in self.functions]
                     kwargs["tool_choice"] = "auto"
 
-                response = client.chat.completions.create(**kwargs)
+                duration, response = time_model_response(client.chat.completions.create, **kwargs)
+                device.log.info(f"Model response time: {duration:.2f} seconds")
+
                 return (True, response)
             except Exception as e:
                 device.log.error(f"Attempt {attempt+1} of {max_retries} failed: {e}")
