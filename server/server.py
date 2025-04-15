@@ -24,7 +24,7 @@ install(show_locals=False)
 
 from devices import DeviceManager
 from kokoro_tts import KokoroTTS
-from llm import LMStudioFunctionCalling
+from llm import KoboldCPPConnector # Import the new KoboldFunctionCalling class instead of LMStudioFunctionCalling
 
 # listen to UDP packets from devices & use Voice Activity Detection (VAD) to add spoken segments to transcribe queue
 def listen_detect(queue, manager, config):
@@ -152,7 +152,7 @@ def transcribe_respond(queue, tts, llm, config):
                     )
                     if last_one:
                         device.stop_listening()  # while server is "thinking"
-                        text_response = llm.askLMStudio(device, new_res)
+                        text_response = llm.ask_kobold(device, new_res)
                         device.last_response = text_response  # use this as prompt for next Whisper transcription
                         wav_fname = tts.text_to_speech(
                             device, text_response, path_name=config['audio_dir']
@@ -277,7 +277,7 @@ def main(**kwargs):
     queue = Queue()
     manager = DeviceManager(config)
     tts = KokoroTTS(config)
-    llm = LMStudioFunctionCalling(config)
+    llm = KoboldCPPConnector(config)
 
     # Send welcome message to each known device on startup
     for device in manager.devices.values():
@@ -289,7 +289,7 @@ def main(**kwargs):
                 device.log.warning(f"Failed to send welcome message: {e}")
 
 
-    atexit.register(manager.save_to_json)
+    atexit.register(manager.save_to_json) 
 
     threads = [
         threading.Thread(target=listen_detect, args=(queue, manager, config), daemon=True),
