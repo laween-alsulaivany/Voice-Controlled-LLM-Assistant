@@ -12,6 +12,17 @@ devices_file: "devices.json"
 voices_file: "voices.json"
 notes_file: "notes.json"
 
+kobold:
+  url: "http://localhost:5001/api"
+  max_context_length: 2048
+  max_length: 200
+  max_history_tokens: 1000
+  temperature: 0.7
+  top_p: 0.9
+  top_k: 40
+  rep_pen: 1.1
+  debug: False  # Set to True for debugging prompts and responses
+
 maubot:
   url: "http://localhost:8080/"
   send_replies: False # Doesn't actually send, just logs for testing
@@ -26,7 +37,7 @@ llm:
   notes_prompt_append: >
     You can help {USER} take notes, remember or record things, and query past notes by date to help find information {USER} may be looking for.
   ha_prompt_append: >
-    You can control lights in the home, using your intuition to decide on what lights are referred to and how to adjust the brightness and color.
+    You can control lights in the home, using your intuition to decide on what lights are referred to and how to adjust the brightness and color. You MUST use function calls whenever controlling the fan or the light.
   maubot_prompt_append: >
     Your main task is to help with summarizing and replying to messages in a friendly, casual and conversational manner, and help {USER} send short replies based on his suggestions of how to answer. Make sure to provide summaries of the messages as casually as possible WITHOUT just reading them out the details. Maybe slip in a joke if possible, but only if you can keep the total answer short. Remember to mention the name of the sender and casually when each message was sent, but making sure to keep the total response as short as possible. DO NOT ask if anything else is needed or whether {USER} wants to reply. If you are asked to compose a new message to a certain person, remember that you can only reply to the most recently retrieved messages that have an index, so instead search for messages from the requested person first.
   reminder_prompt_append: >

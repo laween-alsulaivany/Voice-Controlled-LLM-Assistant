@@ -13,3 +13,4 @@ laween/
 __pycache__/
 .voice/
 venv
+koboldcpp-mac-arm64
