@@ -89,9 +89,40 @@ class KoboldCPPConnector:
                                 },
                                 "required": ["entity_id"],
                             },
+                        }) 
+
+                    light_states = [state for state in states if state['entity_id'].startswith('light.')]
+                    if(len(light_states) > 0):
+                        light_entity_ids = []
+                        for light_state in light_states:
+                            # Only include lights that support color temperature
+                            attrs = light_state.get('attributes', {})
+                            if 'min_color_temp_kelvin' in attrs or 'max_color_temp_kelvin' in attrs:
+                                light_entity_ids.append(light_state['entity_id'])
+                                print(f"{'💡' if light_state['state']=='on' else '🌑'}  {light_state['entity_id']} (supports color temperature)")
+                        
+                        functions.append({
+                            "name": "control_light_temperature",
+                            "description": "Change the color temperature of a light using common descriptions like warm or cool",
+                            "parameters": {
+                                "type": "object",
+                                "properties": {
+                                    "entity_id": {
+                                        "type": "string",
+                                        "enum": light_entity_ids,
+                                        "description": "The entity ID of the light to control",
+                                    },
+                                    "temperature_description": {
+                                        "type": "string",
+                                        "enum": ["warm", "warm white", "cozy", "candle", "neutral", "neutral white", "daylight", "cool", "cool white", "bright white"],
+                                        "description": "The temperature description (warm, neutral, cool, etc.)",
+                                    }
+                                },
+                                "required": ["entity_id", "temperature_description"],
+                            },
                         })
+
                     switch_states = [state for state in states if state['entity_id'].startswith('switch.') and 'fan' in state['entity_id']]
-    
                     if(len(switch_states) > 0):
                         fan_entity_ids = []
                         for switch_state in switch_states:
@@ -176,6 +207,14 @@ User: Turn the living room lights blue
 AI: Setting living room lights to blue for you.
 <functioncall> {{"name":"control_light","arguments":{{"entity_id":["light.living_room_rgbww_lights"],"rgb_color":[0,0,255]}}}}
 
+User: Change the living room light to warm white
+AI: Setting living room lights to a warm white.
+<functioncall> {{"name":"control_light_temperature","arguments":{{"entity_id":"light.living_room_light","temperature_description":"warm white"}}}}
+
+User: Make the light cool white
+AI: Changing lights to cool white.
+<functioncall> {{"name":"control_light_temperature","arguments":{{"entity_id":"light.light","temperature_description":"cool"}}}}
+
 User: Turn on the fan
 AI: Turning on the fan.
 <functioncall> {{"name":"control_fan","arguments":{{"entity_id":"switch.fan","state":"on"}}}}
@@ -209,7 +248,7 @@ AI: Fan turned off.
             "top_k": self.config.get('kobold', {}).get('top_k', 40),
             "rep_pen": self.config.get('kobold', {}).get('rep_pen', 1.1),
             "stop_sequence": ["User:", "\nUser:"],
-            "stream": True  #TODO: Make this a config option
+            "stream": False  #TODO: Make this a config option
         }
         
         try:
@@ -286,6 +325,8 @@ AI: Fan turned off.
                 result = self.control_light(device, **function_args)
             elif function_name == 'control_fan':
                 result = self.control_fan(device, **function_args)
+            elif function_name == 'control_light_temperature':
+                result = self.control_light_temperature(device, **function_args)
             
             results.append({
                 'function': function_name,
@@ -404,6 +445,60 @@ AI: Fan turned off.
         except Exception as e:
             device.log.error(f"Error controlling fan: {e}")
             return f"Error controlling fan: {str(e)}"
+    
+    def control_light_temperature(self, device, entity_id, temperature_description):
+        """Control light color temperature based on description (warm/cool/etc)."""
+        with open("credentials.json", "r") as f:
+            cred = json.load(f)
+        
+        HA_TOKEN = cred.get("home_assistant_token")
+        HA_URL = cred.get("home_assistant_url")
+
+        # Map common temperature descriptions to Kelvin values
+        # Standard ranges:
+        # Warm white: 2700-3000K
+        # Neutral white: 3500-4100K
+        # Cool white: 5000-6500K
+        temperature_map = {
+            "warm": 2700,
+            "warm white": 2700,
+            "cozy": 2400,
+            "candle": 2000,
+            "neutral": 4000,
+            "neutral white": 4000,
+            "daylight": 5000,
+            "cool": 6000,
+            "cool white": 6000,
+            "bright white": 6500,
+        }
+        
+        # Default to neutral if description not found
+        kelvin_value = temperature_map.get(temperature_description.lower(), 4000)
+        
+        url = f"{HA_URL}api/services/light/turn_on"
+        ha_headers = {
+            "Authorization": f"Bearer {HA_TOKEN}",
+            "content-type": "application/json"
+        }
+        
+        params = {
+            "entity_id": entity_id,
+            "kelvin": kelvin_value  # Use the kelvin parameter for Home Assistant
+        }
+        
+        try:
+            device.log.info(f"Light temperature control request: {entity_id} -> {temperature_description} ({kelvin_value}K)")
+            response = requests.post(url, headers=ha_headers, json=params)
+            
+            if response.status_code == 200:
+                device.log.info(f"Light temperature control success")
+                return "Success"
+            else:
+                device.log.error(f"Light temperature control error: {response.status_code} {response.text}")
+                return f"Error: {response.status_code} {response.text}"
+        except Exception as e:
+            device.log.error(f"Error controlling light temperature: {e}")
+            return f"Error controlling light temperature: {str(e)}"
 
     def ask_kobold(self, device, user_input):
         """Main function to get a response from KoboldCPP."""
